@@ -30,7 +30,7 @@
         - Implement logic to randomly select an item from the task list.
         - Update the `View` to prominently display the selected task (the "winner").
 
-- [ ] **Unit 5: Styling & Polish**
+- [x] **Unit 5: Styling & Polish**
     - Goal: Improve the visual experience.
     - Requirements:
         - Use `lipgloss` to style the "winner" text (e.g., bold, color, border).

@@ -7,6 +7,24 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#7D56F4")).
+			Padding(0, 1)
+
+	winnerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#EE6FF8")).
+			Bold(true).
+			Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#EE6FF8"))
+
+	listStyle = lipgloss.NewStyle().
+			MarginTop(1)
 )
 
 type model struct {
@@ -20,7 +38,7 @@ func initialModel() model {
 	ti.Placeholder = "Enter a task..."
 	ti.Focus()
 	ti.CharLimit = 156
-	ti.Width = 20
+	ti.Width = 30
 
 	return model{
 		textInput: ti,
@@ -44,7 +62,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.textInput.Value() != "" {
 				m.tasks = append(m.tasks, m.textInput.Value())
 				m.textInput.SetValue("")
-				// Clear selection when adding new tasks? Maybe not.
 			}
 		}
 
@@ -61,21 +78,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	s := fmt.Sprintf(
-		"What do you need to do?\n\n%s\n\n",
-		m.textInput.View(),
-	)
+	s := titleStyle.Render("Random Task Picker") + "\n\n"
+	s += m.textInput.View() + "\n"
 
-	s += "Tasks:\n"
+	s += listStyle.Render("Tasks:") + "\n"
 	for _, task := range m.tasks {
-		s += fmt.Sprintf("- %s\n", task)
+		s += fmt.Sprintf("• %s\n", task)
 	}
 
 	if m.selectedTask != "" {
-		s += fmt.Sprintf("\nTHE CHOSEN ONE: %s\n", m.selectedTask)
+		s += "\n" + winnerStyle.Render(fmt.Sprintf("DO THIS: %s", m.selectedTask)) + "\n"
 	}
 
-	s += "\nPress 'r' to pick a random task. Esc to quit.\n"
+	s += "\n(Enter: add • r: pick • Esc: quit)\n"
 	return s
 }
 

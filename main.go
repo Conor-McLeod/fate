@@ -35,8 +35,8 @@ func initialModel(db *bolt.DB) model {
 	ti := textinput.New()
 	ti.Placeholder = "Enter a task..."
 	ti.Focus()
-	ti.CharLimit = 156
-	ti.Width = 30
+	ti.CharLimit = 300
+	ti.Width = 100
 
 	ci := textinput.New()
 	ci.Placeholder = "Type 'done' to finish..."
@@ -348,7 +348,7 @@ func (m model) View() string {
 			style := dimStyle
 			if m.cursor == i {
 				cursor = ">"
-				style = cursorStyle
+				style = dimStyle.Copy().Foreground(cursorStyle.GetForeground())
 			}
 			
 			dur := task.Duration().Round(time.Minute).String()
@@ -376,7 +376,7 @@ func (m model) View() string {
 		style := taskStyle
 		if m.cursor == i {
 			cursor = ">" // cursor!
-			style = cursorStyle
+			style = taskStyle.Copy().Foreground(cursorStyle.GetForeground())
 		}
 		
 		// If editing this specific task, maybe mark it visually?

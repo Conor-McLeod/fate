@@ -13,7 +13,8 @@ var (
 			Bold(true).
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#EE6FF8"))
+			BorderForeground(lipgloss.Color("#EE6FF8")).
+			Width(60)
 
 	listStyle = lipgloss.NewStyle().
 			MarginTop(1)
@@ -22,10 +23,12 @@ var (
 			Foreground(lipgloss.Color("#EE6FF8"))
 
 	taskStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA"))
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Width(60)
 
 	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#666666"))
+			Foreground(lipgloss.Color("#666666")).
+			Width(60)
 
 	strikeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#444444")).

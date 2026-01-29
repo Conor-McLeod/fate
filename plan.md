@@ -16,7 +16,7 @@
         - Implement the mandatory interface methods: `Init`, `Update`, `View`.
         - Ensure the app runs and can be exited with `ctrl+c` or `q`.
 
-- [ ] **Unit 3: Task Input & List Display**
+- [x] **Unit 3: Task Input & List Display**
     - Goal: Enable users to add tasks to a list.
     - Requirements:
         - Integrate `textinput.Model` into the main model.

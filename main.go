@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -16,54 +14,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var (
-	titleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#7D56F4")).
-			Padding(0, 1)
 
-	winnerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EE6FF8")).
-			Bold(true).
-			Padding(1, 2).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#EE6FF8"))
 
-	listStyle = lipgloss.NewStyle().
-			MarginTop(1)
 
-	cursorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EE6FF8"))
-
-	taskStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA"))
-
-	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#666666"))
-			
-	strikeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#444444")).
-			Strikethrough(true)
-)
-
-const (
-	dbName     = "tasks.db"
-	bucketName = "Tasks"
-)
-
-type Task struct {
-	ID          int       `json:"id"`
-	Name        string    `json:"name"`
-	PickedAt    time.Time `json:"picked_at,omitempty"`
-	CompletedAt time.Time `json:"completed_at,omitempty"`
-}
-
-func (t Task) Duration() time.Duration {
-	if t.CompletedAt.IsZero() || t.PickedAt.IsZero() {
-		return 0
-	}
-	return t.CompletedAt.Sub(t.PickedAt)
-}
 
 type model struct {
 	db           *bolt.DB
@@ -120,201 +73,188 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
-	isBlocked := m.selectedTask != nil
-
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC:
-			return m, tea.Quit
-		case tea.KeyEsc:
-			if m.confirmClear {
-				m.confirmClear = false
-				return m, nil
-			}
-			if m.textInput.Focused() || m.confirmInput.Focused() {
-				m.textInput.Blur()
-				m.confirmInput.Blur()
-				return m, nil
-			}
-			return m, tea.Quit
-		case tea.KeyTab:
-			if isBlocked {
-				if m.textInput.Focused() {
-					m.textInput.Blur()
-					m.confirmInput.Focus()
-				} else {
-					// If confirm is focused OR we are in command mode, go to input?
-					// Actually, let's swap: Input <-> Confirm.
-					// If we are in Command mode (blurred), Tab should probably go to Confirm (the action) or Input?
-					// Let's say: Input -> Confirm -> Input.
-					if m.confirmInput.Focused() {
-						m.confirmInput.Blur()
-						m.textInput.Focus()
-					} else {
-						// From Command mode, default to Confirm as it's the blocking action
-						m.confirmInput.Focus()
-					}
-				}
-				return m, nil
-			} else {
-				if m.textInput.Focused() {
-					m.textInput.Blur()
-				} else {
-					m.textInput.Focus()
-				}
-				return m, nil
-			}
-		case tea.KeyEnter:
+		if model, cmd, handled := m.handleKey(msg); handled {
+			return model, cmd
+		}
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	var cmd2 tea.Cmd
+	m.confirmInput, cmd2 = m.confirmInput.Update(msg)
+
+	return m, tea.Batch(cmd, cmd2)
+}
+
+func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
+	isBlocked := m.selectedTask != nil
+
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit, true
+	case tea.KeyEsc:
+		if m.confirmClear {
+			m.confirmClear = false
+			return m, nil, true
+		}
+		if m.textInput.Focused() || m.confirmInput.Focused() {
+			m.textInput.Blur()
+			m.confirmInput.Blur()
+			return m, nil, true
+		}
+		return m, tea.Quit, true
+	case tea.KeyTab:
+		if isBlocked {
 			if m.textInput.Focused() {
-				taskName := strings.TrimSpace(m.textInput.Value())
-				if taskName == "" {
-					return m, nil
+				m.textInput.Blur()
+				m.confirmInput.Focus()
+			} else {
+				if m.confirmInput.Focused() {
+					m.confirmInput.Blur()
+					m.textInput.Focus()
+				} else {
+					m.confirmInput.Focus()
+				}
+			}
+			return m, nil, true
+		} else {
+			if m.textInput.Focused() {
+				m.textInput.Blur()
+			} else {
+				m.textInput.Focus()
+			}
+			return m, nil, true
+		}
+	case tea.KeyEnter:
+		if m.textInput.Focused() {
+			taskName := strings.TrimSpace(m.textInput.Value())
+			if taskName == "" {
+				return m, nil, true
+			}
+
+			if m.editingTask != nil {
+				m.editingTask.Name = taskName
+				_ = updateTask(m.db, *m.editingTask)
+
+				// Update the task in the tasks slice
+				for i, t := range m.tasks {
+					if t.ID == m.editingTask.ID {
+						m.tasks[i] = *m.editingTask
+						break
+					}
 				}
 
-				if m.editingTask != nil {
-					// Update existing
-					m.editingTask.Name = taskName
-					if err := updateTask(m.db, *m.editingTask); err != nil {
-						// Handle error
-					}
-					// Update in slice (it's a pointer to the slice element, so actually it might already be updated in memory? 
-					// NO, m.editingTask is a pointer to the slice element of the *previous* model state. 
-					// But we are in the same update loop. 
-					// Wait, Go slices... if we modified the struct via pointer, it modifies the underlying array if capacity holds.
-					// But `m.tasks` is a value receiver in the function signature `(m model)`.
-					// So `m.editingTask` points to the heap or the old array. 
-					// We need to explicitly update the slice in the new model `m`.
-					
-					// Re-find and update to be safe and functional style-ish
-					for i, t := range m.tasks {
-						if t.ID == m.editingTask.ID {
-							m.tasks[i] = *m.editingTask
-							break
-						}
-					}
-					
-					m.editingTask = nil
+				m.editingTask = nil
+				m.textInput.SetValue("")
+				m.textInput.Blur()
+			} else {
+				task, err := addTask(m.db, taskName)
+				if err == nil {
+					m.tasks = append(m.tasks, task)
 					m.textInput.SetValue("")
-					m.textInput.Blur() // Exit edit mode completely
-				} else {
-					// Create new
-					task, err := addTask(m.db, taskName)
-					if err != nil {
-						// In a real app, handle error properly
-					} else {
-						m.tasks = append(m.tasks, task)
-						m.textInput.SetValue("")
-						// Move cursor to new item
-						m.cursor = len(m.tasks) - 1
-					}
-				}
-				return m, nil
-			} else if m.confirmInput.Focused() {
-				if m.confirmInput.Value() == "done" {
-					m.completeSelectedTask()
-					m.confirmInput.SetValue("")
-					m.confirmInput.Blur()
-					m.textInput.Focus() // Return focus to main input
-				}
-				return m, nil
-			}
-		case tea.KeyUp:
-			if !m.textInput.Focused() && !m.confirmInput.Focused() {
-				if m.cursor > 0 {
-					m.cursor--
+					m.cursor = len(m.tasks) - 1
 				}
 			}
-		case tea.KeyDown:
-			if !m.textInput.Focused() && !m.confirmInput.Focused() {
-				maxLen := len(m.tasks)
-				if m.showHistory {
-					maxLen = len(m.history)
-				}
-				if m.cursor < maxLen-1 {
-					m.cursor++
-				}
+			return m, nil, true
+		} else if m.confirmInput.Focused() {
+			if m.confirmInput.Value() == "done" {
+				m.completeSelectedTask()
+				m.confirmInput.SetValue("")
+				m.confirmInput.Blur()
+				m.textInput.Focus()
 			}
-		case tea.KeyBackspace, tea.KeyDelete:
-			canDelete := !m.textInput.Focused() && !m.confirmInput.Focused() && !isBlocked
-			hasItems := (m.showHistory && len(m.history) > 0) || (!m.showHistory && len(m.tasks) > 0)
-			
-			if canDelete && hasItems {
-				m.deleteSelected()
+			return m, nil, true
+		}
+	case tea.KeyUp:
+		if !m.textInput.Focused() && !m.confirmInput.Focused() {
+			if m.cursor > 0 {
+				m.cursor--
 			}
+			return m, nil, true
+		}
+	case tea.KeyDown:
+		if !m.textInput.Focused() && !m.confirmInput.Focused() {
+			maxLen := len(m.tasks)
+			if m.showHistory {
+				maxLen = len(m.history)
+			}
+			if m.cursor < maxLen-1 {
+				m.cursor++
+			}
+			return m, nil, true
+		}
+	case tea.KeyBackspace, tea.KeyDelete:
+		canDelete := !m.textInput.Focused() && !m.confirmInput.Focused() && !isBlocked
+		hasItems := (m.showHistory && len(m.history) > 0) || (!m.showHistory && len(m.tasks) > 0)
+
+		if canDelete && hasItems {
+			m.deleteSelected()
+			return m, nil, true
+		}
+	}
+
+	// Only handle character commands if NO input is focused
+	if !m.textInput.Focused() && !m.confirmInput.Focused() {
+		if m.confirmClear {
+			if msg.String() == "y" || msg.String() == "Y" {
+				m.clearAll()
+			}
+			m.confirmClear = false
+			return m, nil, true
 		}
 
-		// Only handle character commands if NO input is focused
-		if !m.textInput.Focused() && !m.confirmInput.Focused() {
-			if m.confirmClear {
-				if msg.String() == "y" || msg.String() == "Y" {
-					m.clearAll()
-				}
-				m.confirmClear = false
-				return m, nil
+		switch msg.String() {
+		case "k":
+			if m.cursor > 0 {
+				m.cursor--
 			}
-
-			switch msg.String() {
-			case "k":
-				if m.cursor > 0 {
-					m.cursor--
-				}
-			case "j":
-				maxLen := len(m.tasks)
-				if m.showHistory {
-					maxLen = len(m.history)
-				}
-				if m.cursor < maxLen-1 {
-					m.cursor++
-				}
-			case "r":
-				if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
-					// Pick a random task
-					randomIndex := rand.Intn(len(m.tasks))
-					m.selectedTask = &m.tasks[randomIndex]
-					
-					// Set PickedAt
-					m.selectedTask.PickedAt = time.Now()
-					// Update DB
-					_ = updateTask(m.db, *m.selectedTask)
-					
-					// Move cursor to winner for visibility
-					m.cursor = randomIndex
-					
-					// Auto-focus confirm input for better UX
-					m.confirmInput.Focus()
-					return m, nil
-				}
-			case "d":
-				if !isBlocked && ((!m.showHistory && len(m.tasks) > 0) || (m.showHistory && len(m.history) > 0)) {
-					m.deleteSelected()
-				}
-			case "c":
-				if !isBlocked && !m.showHistory {
-					m.confirmClear = true
-				}
-			case "h":
-				m.showHistory = !m.showHistory
-				m.cursor = 0
-			case "e":
-				if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
-					// Start editing
-					m.editingTask = &m.tasks[m.cursor]
-					m.textInput.SetValue(m.editingTask.Name)
-					m.textInput.Focus()
-					return m, nil
-				}
+			return m, nil, true
+		case "j":
+			maxLen := len(m.tasks)
+			if m.showHistory {
+				maxLen = len(m.history)
+			}
+			if m.cursor < maxLen-1 {
+				m.cursor++
+			}
+			return m, nil, true
+		case "r":
+			if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
+				randomIndex := rand.Intn(len(m.tasks))
+				m.selectedTask = &m.tasks[randomIndex]
+				m.selectedTask.PickedAt = time.Now()
+				_ = updateTask(m.db, *m.selectedTask)
+				m.cursor = randomIndex
+				m.confirmInput.Focus()
+				return m, nil, true
+			}
+		case "d":
+			if !isBlocked && ((!m.showHistory && len(m.tasks) > 0) || (m.showHistory && len(m.history) > 0)) {
+				m.deleteSelected()
+				return m, nil, true
+			}
+		case "c":
+			if !isBlocked && !m.showHistory {
+				m.confirmClear = true
+				return m, nil, true
+			}
+		case "h":
+			m.showHistory = !m.showHistory
+			m.cursor = 0
+			return m, nil, true
+		case "e":
+			if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
+				m.editingTask = &m.tasks[m.cursor]
+				m.textInput.SetValue(m.editingTask.Name)
+				m.textInput.Focus()
+				return m, nil, true
 			}
 		}
 	}
 
-	m.textInput, cmd = m.textInput.Update(msg)
-	var cmd2 tea.Cmd
-	m.confirmInput, cmd2 = m.confirmInput.Update(msg)
-	
-	return m, tea.Batch(cmd, cmd2)
+	return m, nil, false
 }
 
 func (m *model) completeSelectedTask() {
@@ -483,95 +423,7 @@ func (m model) View() string {
 	return s
 }
 
-// DB Helpers
 
-func setupDB() (*bolt.DB, error) {
-	db, err := bolt.Open(dbName, 0600, nil)
-	if err != nil {
-		return nil, err
-	}
-	err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(bucketName))
-		return err
-	})
-	return db, err
-}
-
-func addTask(db *bolt.DB, name string) (Task, error) {
-	var task Task
-	err := db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucketName))
-		id64, _ := b.NextSequence()
-		id := int(id64)
-		
-		task = Task{
-			ID:   id,
-			Name: name,
-		}
-		
-		buf, err := json.Marshal(task)
-		if err != nil {
-			return err
-		}
-		
-		return b.Put(itob(id), buf)
-	})
-	return task, err
-}
-
-func updateTask(db *bolt.DB, task Task) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucketName))
-		
-		buf, err := json.Marshal(task)
-		if err != nil {
-			return err
-		}
-		
-		return b.Put(itob(task.ID), buf)
-	})
-}
-
-func loadTasks(db *bolt.DB) ([]Task, error) {
-	var tasks []Task
-	err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucketName))
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var t Task
-			if err := json.Unmarshal(v, &t); err != nil {
-				// Skip invalid entries or handle error
-				continue 
-			}
-			tasks = append(tasks, t)
-		}
-		return nil
-	})
-	return tasks, err
-}
-
-func deleteTask(db *bolt.DB, id int) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucketName))
-		return b.Delete(itob(id))
-	})
-}
-
-func clearTasks(db *bolt.DB) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket([]byte(bucketName)); err != nil {
-			return err
-		}
-		_, err := tx.CreateBucket([]byte(bucketName))
-		return err
-	})
-}
-
-func itob(v int) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, uint64(v))
-	return b
-}
 
 func main() {
 	db, err := setupDB()

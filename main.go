@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -9,19 +10,19 @@ import (
 )
 
 type model struct {
-	textInput textinput.Model
-	tasks     []string
+	textInput    textinput.Model
+	tasks        []string
+	selectedTask string
 }
 
 func initialModel() model {
+	ti := textinput.New()
+	ti.Placeholder = "Enter a task..."
+	ti.Focus()
+	ti.CharLimit = 156
+	ti.Width = 20
 
-ti := textinput.New()
-ti.Placeholder = "Enter a task..."
-ti.Focus()
-ti.CharLimit = 156
-ti.Width = 20
-
-return model{
+	return model{
 		textInput: ti,
 		tasks:     []string{},
 	}
@@ -43,6 +44,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.textInput.Value() != "" {
 				m.tasks = append(m.tasks, m.textInput.Value())
 				m.textInput.SetValue("")
+				// Clear selection when adding new tasks? Maybe not.
+			}
+		}
+
+		switch msg.String() {
+		case "r":
+			if len(m.tasks) > 0 {
+				m.selectedTask = m.tasks[rand.Intn(len(m.tasks))]
 			}
 		}
 	}
@@ -62,7 +71,11 @@ func (m model) View() string {
 		s += fmt.Sprintf("- %s\n", task)
 	}
 
-	s += "\nPress Esc to quit.\n"
+	if m.selectedTask != "" {
+		s += fmt.Sprintf("\nTHE CHOSEN ONE: %s\n", m.selectedTask)
+	}
+
+	s += "\nPress 'r' to pick a random task. Esc to quit.\n"
 	return s
 }
 

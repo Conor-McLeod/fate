@@ -23,7 +23,7 @@
         - Handle `Enter` key: Add the current input value to a `[]string` of tasks and clear the input.
         - Render the list of added tasks below the input field in the `View`.
 
-- [ ] **Unit 4: Random Selection Logic**
+- [x] **Unit 4: Random Selection Logic**
     - Goal: Implement the core "randomizer" feature.
     - Requirements:
         - Define a key binding (e.g., `r` or a specific button) to trigger selection.

@@ -75,6 +75,7 @@ type model struct {
 	editingTask  *Task  // Pointer to task being edited
 	cursor       int
 	showHistory  bool
+	confirmClear bool
 }
 
 func initialModel(db *bolt.DB) model {
@@ -126,29 +127,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
-			if m.editingTask != nil {
-				// Cancel edit
-				m.editingTask = nil
-				m.textInput.SetValue("")
+		case tea.KeyCtrlC:
+			return m, tea.Quit
+		case tea.KeyEsc:
+			if m.confirmClear {
+				m.confirmClear = false
+				return m, nil
+			}
+			if m.textInput.Focused() || m.confirmInput.Focused() {
 				m.textInput.Blur()
+				m.confirmInput.Blur()
 				return m, nil
 			}
 			return m, tea.Quit
 		case tea.KeyTab:
-			if m.textInput.Focused() {
-				// If editing, Tab might cancel or just blur? Let's say blur cancels edit mode for now to be safe or just blurs.
-				// If we blur while editing, we are kinda in limbo. 
-				// Let's enforce that Tab cancels edit if active, or just behaves normally but keeps editing state?
-				// Simplest: Tab blurs input. If editingTask is set, it stays set, so if they focus again they are still editing.
-				m.textInput.Blur()
-				if isBlocked {
+			if isBlocked {
+				if m.textInput.Focused() {
+					m.textInput.Blur()
 					m.confirmInput.Focus()
+				} else {
+					// If confirm is focused OR we are in command mode, go to input?
+					// Actually, let's swap: Input <-> Confirm.
+					// If we are in Command mode (blurred), Tab should probably go to Confirm (the action) or Input?
+					// Let's say: Input -> Confirm -> Input.
+					if m.confirmInput.Focused() {
+						m.confirmInput.Blur()
+						m.textInput.Focus()
+					} else {
+						// From Command mode, default to Confirm as it's the blocking action
+						m.confirmInput.Focus()
+					}
 				}
-			} else if m.confirmInput.Focused() {
-				m.confirmInput.Blur()
+				return m, nil
 			} else {
-				m.textInput.Focus()
+				if m.textInput.Focused() {
+					m.textInput.Blur()
+				} else {
+					m.textInput.Focus()
+				}
+				return m, nil
 			}
 		case tea.KeyEnter:
 			if m.textInput.Focused() {
@@ -194,6 +211,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.cursor = len(m.tasks) - 1
 					}
 				}
+				return m, nil
 			} else if m.confirmInput.Focused() {
 				if m.confirmInput.Value() == "done" {
 					m.completeSelectedTask()
@@ -201,28 +219,56 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.confirmInput.Blur()
 					m.textInput.Focus() // Return focus to main input
 				}
+				return m, nil
 			}
 		case tea.KeyUp:
-			if !m.showHistory {
+			if !m.textInput.Focused() && !m.confirmInput.Focused() {
 				if m.cursor > 0 {
 					m.cursor--
 				}
 			}
 		case tea.KeyDown:
-			if !m.showHistory {
-				if m.cursor < len(m.tasks)-1 {
+			if !m.textInput.Focused() && !m.confirmInput.Focused() {
+				maxLen := len(m.tasks)
+				if m.showHistory {
+					maxLen = len(m.history)
+				}
+				if m.cursor < maxLen-1 {
 					m.cursor++
 				}
 			}
 		case tea.KeyBackspace, tea.KeyDelete:
-			if !m.textInput.Focused() && !m.confirmInput.Focused() && len(m.tasks) > 0 && !isBlocked && !m.showHistory {
+			canDelete := !m.textInput.Focused() && !m.confirmInput.Focused() && !isBlocked
+			hasItems := (m.showHistory && len(m.history) > 0) || (!m.showHistory && len(m.tasks) > 0)
+			
+			if canDelete && hasItems {
 				m.deleteSelected()
 			}
 		}
 
 		// Only handle character commands if NO input is focused
 		if !m.textInput.Focused() && !m.confirmInput.Focused() {
+			if m.confirmClear {
+				if msg.String() == "y" || msg.String() == "Y" {
+					m.clearAll()
+				}
+				m.confirmClear = false
+				return m, nil
+			}
+
 			switch msg.String() {
+			case "k":
+				if m.cursor > 0 {
+					m.cursor--
+				}
+			case "j":
+				maxLen := len(m.tasks)
+				if m.showHistory {
+					maxLen = len(m.history)
+				}
+				if m.cursor < maxLen-1 {
+					m.cursor++
+				}
 			case "r":
 				if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
 					// Pick a random task
@@ -236,23 +282,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					
 					// Move cursor to winner for visibility
 					m.cursor = randomIndex
+					
+					// Auto-focus confirm input for better UX
+					m.confirmInput.Focus()
+					return m, nil
 				}
 			case "d":
-				if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
+				if !isBlocked && ((!m.showHistory && len(m.tasks) > 0) || (m.showHistory && len(m.history) > 0)) {
 					m.deleteSelected()
 				}
 			case "c":
 				if !isBlocked && !m.showHistory {
-					m.clearAll()
+					m.confirmClear = true
 				}
 			case "h":
 				m.showHistory = !m.showHistory
+				m.cursor = 0
 			case "e":
 				if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
 					// Start editing
 					m.editingTask = &m.tasks[m.cursor]
 					m.textInput.SetValue(m.editingTask.Name)
 					m.textInput.Focus()
+					return m, nil
 				}
 			}
 		}
@@ -295,25 +347,32 @@ func (m *model) completeSelectedTask() {
 }
 
 func (m *model) deleteSelected() {
-	if m.cursor < 0 || m.cursor >= len(m.tasks) {
+	var targetList *[]Task
+	if m.showHistory {
+		targetList = &m.history
+	} else {
+		targetList = &m.tasks
+	}
+
+	if m.cursor < 0 || m.cursor >= len(*targetList) {
 		return
 	}
 	
-	task := m.tasks[m.cursor]
+	task := (*targetList)[m.cursor]
 	if err := deleteTask(m.db, task.ID); err != nil {
 		return // Handle error
 	}
 
 	// Remove from slice
-	m.tasks = append(m.tasks[:m.cursor], m.tasks[m.cursor+1:]...)
+	*targetList = append((*targetList)[:m.cursor], (*targetList)[m.cursor+1:]...)
 
 	// Adjust cursor
-	if m.cursor >= len(m.tasks) && len(m.tasks) > 0 {
-		m.cursor = len(m.tasks) - 1
+	if m.cursor >= len(*targetList) && len(*targetList) > 0 {
+		m.cursor = len(*targetList) - 1
 	}
 	
-	// Reset selection if we deleted the winner (shouldn't happen if blocked, but safe to keep)
-	if m.selectedTask != nil && m.selectedTask.ID == task.ID {
+	// Reset selection if we deleted the winner (only relevant for pending tasks)
+	if !m.showHistory && m.selectedTask != nil && m.selectedTask.ID == task.ID {
 		m.selectedTask = nil
 	}
 }
@@ -344,16 +403,30 @@ func (m model) View() string {
 		if len(m.history) == 0 {
 			s += dimStyle.Render("No history yet.") + "\n"
 		}
-		for _, task := range m.history {
-			dur := task.Duration().Round(time.Minute)
-			s += fmt.Sprintf("• %s %s\n", task.Name, dimStyle.Render(fmt.Sprintf("(%s)", dur)))
+		for i, task := range m.history {
+			cursor := " "
+			style := dimStyle
+			if m.cursor == i {
+				cursor = ">"
+				style = cursorStyle
+			}
+			
+			dur := task.Duration().Round(time.Minute).String()
+			dur = strings.TrimSuffix(dur, "0s")
+			if dur == "" {
+				dur = "0m"
+			}
+			s += fmt.Sprintf("%s %s %s\n", cursorStyle.Render(cursor), task.Name, style.Render(fmt.Sprintf("(%s)", dur)))
 		}
-		s += "\n" + dimStyle.Render("(h: back to tasks • Esc: quit)") + "\n"
+		s += "\n" + dimStyle.Render("(h: back • j/k: nav • d: delete • Esc: quit)") + "\n"
 		return s
 	}
 
 	if m.editingTask != nil {
 		s += lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render("EDITING MODE") + "\n"
+	}
+	if m.confirmClear {
+		s += lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Bold(true).Render("Are you sure you want to clear? y/N") + "\n"
 	}
 	s += m.textInput.View() + "\n"
 
@@ -380,24 +453,30 @@ func (m model) View() string {
 	}
 
 	help := ""
-	if m.textInput.Focused() {
+	if m.confirmClear {
+		help = "(y: yes, clear all • n: cancel)"
+	} else if m.textInput.Focused() {
 		if m.editingTask != nil {
 			help = "(Enter: save • Esc: cancel edit)"
 		} else {
-			help = "(Enter: add • Tab: commands • Esc: quit)"
+			if m.selectedTask != nil {
+				help = "(Enter: add • Tab: confirm • Esc: blur)"
+			} else {
+				help = "(Enter: add • Tab: commands • Esc: blur)"
+			}
 		}
 	} else if m.confirmInput.Focused() {
-		help = "(Type 'done' & Enter: finish • Tab: commands • Esc: quit)"
+		help = "(Type 'done' & Enter: finish • Tab: input • Esc: blur)"
 	} else {
 		if m.selectedTask != nil {
 			// Blocked state
-			help = fmt.Sprintf("(%s • %s • %s • %s • Tab: edit • Esc: quit)", 
+			help = fmt.Sprintf("(%s • %s • %s • %s • Tab: done • Esc: quit)", 
 				strikeStyle.Render("r: pick"), 
 				strikeStyle.Render("d: delete"), 
 				strikeStyle.Render("c: clear"),
 				"h: history") // Allow history check while blocked? Sure.
 		} else {
-			help = "(r: pick • d: delete • c: clear • e: edit • h: history • Tab: input • Esc: quit)"
+			help = "(j/k: nav • r: pick • d: delete • c: clear • e: edit • h: history • Tab: input • Esc: quit)"
 		}
 	}
 	s += "\n" + dimStyle.Render(help) + "\n"

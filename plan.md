@@ -8,7 +8,7 @@
         - Install `github.com/charmbracelet/bubbles`.
         - Install `github.com/charmbracelet/lipgloss`.
 
-- [ ] **Unit 2: Application Skeleton**
+- [x] **Unit 2: Application Skeleton**
     - Goal: Create the basic structure of a Bubble Tea program.
     - Requirements:
         - Create `main.go`.

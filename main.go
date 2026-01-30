@@ -31,6 +31,14 @@ type model struct {
 	confirmClear bool
 }
 
+type tickMsg time.Time
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
 func initialModel(db *bolt.DB) model {
 	ti := textinput.New()
 	ti.Placeholder = "Enter a task..."
@@ -57,7 +65,7 @@ func initialModel(db *bolt.DB) model {
 		}
 	}
 
-	return model{
+	m := model{
 		db:           db,
 		textInput:    ti,
 		confirmInput: ci,
@@ -66,10 +74,23 @@ func initialModel(db *bolt.DB) model {
 		cursor:       0,
 		showHistory:  false,
 	}
+
+	// Restore active task if exists
+	for i := range m.tasks {
+		if !m.tasks[i].PickedAt.IsZero() {
+			m.selectedTask = &m.tasks[i]
+			m.cursor = i
+			m.confirmInput.Focus()
+			m.textInput.Blur()
+			break
+		}
+	}
+
+	return m
 }
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, tick())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -78,6 +99,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if model, cmd, handled := m.handleKey(msg); handled {
 			return model, cmd
 		}
+	case tickMsg:
+		return m, tick()
 	}
 
 	var cmd tea.Cmd
@@ -388,7 +411,9 @@ func (m model) View() string {
 	}
 
 	if m.selectedTask != nil {
+		elapsed := time.Since(m.selectedTask.PickedAt).Round(time.Second)
 		s += "\n" + winnerStyle.Render(fmt.Sprintf("DO THIS: %s", m.selectedTask.Name)) + "\n"
+		s += lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(fmt.Sprintf("Elapsed: %s", elapsed)) + "\n"
 		s += m.confirmInput.View() + "\n"
 	}
 

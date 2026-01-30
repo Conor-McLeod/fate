@@ -16,6 +16,7 @@ var (
 			Width(60)
 
 	listStyle = lipgloss.NewStyle().
+			Bold(true).
 			MarginTop(1)
 
 	cursorStyle = lipgloss.NewStyle().

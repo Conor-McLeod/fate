@@ -367,11 +367,15 @@ func (m model) View() string {
 			s += dimStyle.Render("No history yet.") + "\n"
 		}
 		for i, task := range m.history {
-			cursor := " "
+			cursor := "•"
 			style := dimStyle
+			var cStr string
 			if m.cursor == i {
 				cursor = ">"
 				style = dimStyle.Copy().Foreground(cursorStyle.GetForeground())
+				cStr = cursorStyle.Render(cursor)
+			} else {
+				cStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(cursor)
 			}
 			
 			dur := task.Duration().Round(time.Minute).String()
@@ -379,7 +383,9 @@ func (m model) View() string {
 			if dur == "" {
 				dur = "0m"
 			}
-			s += fmt.Sprintf("%s %s %s\n", cursorStyle.Render(cursor), task.Name, style.Render(fmt.Sprintf("(%s)", dur)))
+			
+			tStr := style.Render(fmt.Sprintf("%s (%s)", task.Name, dur))
+			s += lipgloss.JoinHorizontal(lipgloss.Top, cStr+" ", tStr) + "\n"
 		}
 		s += "\n" + dimStyle.Render("(h: back • j/k: nav • d: delete • Esc: quit)") + "\n"
 		return s
@@ -395,11 +401,15 @@ func (m model) View() string {
 
 	s += listStyle.Render("Tasks:") + "\n"
 	for i, task := range m.tasks {
-		cursor := " " // no cursor
+		cursor := "•" 
 		style := taskStyle
+		var cStr string
 		if m.cursor == i {
 			cursor = ">" // cursor!
 			style = taskStyle.Copy().Foreground(cursorStyle.GetForeground())
+			cStr = cursorStyle.Render(cursor)
+		} else {
+			cStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(cursor)
 		}
 		
 		// If editing this specific task, maybe mark it visually?
@@ -407,7 +417,8 @@ func (m model) View() string {
 			style = style.Copy().Foreground(lipgloss.Color("205")).Bold(true)
 		}
 		
-		s += fmt.Sprintf("%s %s\n", cursorStyle.Render(cursor), style.Render(task.Name))
+		tStr := style.Render(task.Name)
+		s += lipgloss.JoinHorizontal(lipgloss.Top, cStr+" ", tStr) + "\n"
 	}
 
 	if m.selectedTask != nil {

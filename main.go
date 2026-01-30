@@ -412,8 +412,24 @@ func (m model) View() string {
 
 	if m.selectedTask != nil {
 		elapsed := time.Since(m.selectedTask.PickedAt).Round(time.Second)
-		s += "\n" + winnerStyle.Render(fmt.Sprintf("DO THIS: %s", m.selectedTask.Name)) + "\n"
-		s += lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(fmt.Sprintf("Elapsed: %s", elapsed)) + "\n"
+		
+		accentColor := lipgloss.Color("#EE6FF8")
+		whiteColor := lipgloss.Color("#FFFFFF")
+		
+		label := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("DO THIS:")
+		
+		// Create the content for the box
+		boxWidth := 60
+		taskName := lipgloss.NewStyle().Foreground(whiteColor).Render(m.selectedTask.Name)
+		separator := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("─", boxWidth-2))
+		
+		timerLabel := lipgloss.NewStyle().Foreground(accentColor).Render("Elapsed: ")
+		timerValue := lipgloss.NewStyle().Foreground(whiteColor).Render(elapsed.String())
+		
+		boxContent := fmt.Sprintf("%s\n%s\n%s%s", taskName, separator, timerLabel, timerValue)
+		
+		s += "\n" + label + "\n"
+		s += winnerStyle.Render(boxContent) + "\n"
 		s += m.confirmInput.View() + "\n"
 	}
 

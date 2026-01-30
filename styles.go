@@ -9,9 +9,8 @@ var (
 			Padding(0, 1)
 
 	winnerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EE6FF8")).
 			Bold(true).
-			Padding(1, 2).
+			Padding(0, 1).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#EE6FF8")).
 			Width(60)

@@ -398,7 +398,7 @@ func (m model) View() string {
 	s += "\n" + dimStyle.Render(m.viewHelp()) + "\n"
 
 	if m.err != nil {
-		s += lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("\nError: %v", m.err))
+		s += lipgloss.NewStyle().Foreground(ColorError).Render(fmt.Sprintf("\nError: %v", m.err))
 	}
 
 	return s
@@ -418,7 +418,7 @@ func (m model) viewHistory() string {
 			style = taskStyle.Copy().Foreground(cursorStyle.GetForeground())
 			cStr = cursorStyle.Render(cursor)
 		} else {
-			cStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(cursor)
+			cStr = lipgloss.NewStyle().Foreground(ColorTextMain).Render(cursor)
 		}
 
 		dur := task.Duration().Round(time.Minute).String()
@@ -436,10 +436,10 @@ func (m model) viewHistory() string {
 func (m model) viewPending() string {
 	s := ""
 	if m.state == StateEditing {
-		s += lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render("EDITING MODE") + "\n"
+		s += lipgloss.NewStyle().Foreground(ColorSpecial).Render("EDITING MODE") + "\n"
 	}
 	if m.state == StateConfirmClear {
-		s += lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Bold(true).Render("Are you sure you want to clear? y/N") + "\n"
+		s += lipgloss.NewStyle().Foreground(ColorError).Bold(true).Render("Are you sure you want to clear? y/N") + "\n"
 	}
 	s += m.textInput.View() + "\n"
 
@@ -453,12 +453,12 @@ func (m model) viewPending() string {
 			style = taskStyle.Copy().Foreground(cursorStyle.GetForeground())
 			cStr = cursorStyle.Render(cursor)
 		} else {
-			cStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(cursor)
+			cStr = lipgloss.NewStyle().Foreground(ColorTextMain).Render(cursor)
 		}
 
 		// If editing this specific task, maybe mark it visually?
 		if m.state == StateEditing && m.editingTask != nil && m.editingTask.ID == task.ID {
-			style = style.Copy().Foreground(lipgloss.Color("205")).Bold(true)
+			style = style.Copy().Foreground(ColorSpecial).Bold(true)
 		}
 
 		tStr := style.Render(task.Name)
@@ -470,18 +470,15 @@ func (m model) viewPending() string {
 func (m model) viewWinner() string {
 	elapsed := time.Since(m.selectedTask.PickedAt).Round(time.Second)
 
-	accentColor := lipgloss.Color("#EE6FF8")
-	whiteColor := lipgloss.Color("#FFFFFF")
-
-	label := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("DO THIS:")
+	label := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true).Render("DO THIS:")
 
 	// Create the content for the box
 	boxWidth := 60
-	taskName := lipgloss.NewStyle().Foreground(whiteColor).Render(m.selectedTask.Name)
-	separator := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("─", boxWidth-2))
+	taskName := lipgloss.NewStyle().Foreground(ColorTextMain).Render(m.selectedTask.Name)
+	separator := lipgloss.NewStyle().Foreground(ColorAccent).Render(strings.Repeat("─", boxWidth-2))
 
-	timerLabel := lipgloss.NewStyle().Foreground(accentColor).Render("Elapsed: ")
-	timerValue := lipgloss.NewStyle().Foreground(accentColor).Render(elapsed.String())
+	timerLabel := lipgloss.NewStyle().Foreground(ColorAccent).Render("Elapsed: ")
+	timerValue := lipgloss.NewStyle().Foreground(ColorTextMain).Render(elapsed.String())
 
 	boxContent := fmt.Sprintf("%s\n%s\n%s%s", taskName, separator, timerLabel, timerValue)
 

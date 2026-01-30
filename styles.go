@@ -4,19 +4,19 @@ import "github.com/charmbracelet/lipgloss"
 
 // Palette defines the application's color scheme.
 var (
-	ColorTextMain = lipgloss.Color("#FAFAFA")
-	ColorBrand    = lipgloss.Color("#7D56F4")
-	ColorAccent   = lipgloss.Color("#EE6FF8")
-	ColorDim      = lipgloss.Color("#666666")
-	ColorStrike   = lipgloss.Color("#444444")
-	ColorError    = lipgloss.Color("#FF0000")
-	ColorSpecial  = lipgloss.Color("205") // Hot Pink
+	ColorTextMain    = lipgloss.Color("#FAFAFA")
+	ColorTextInverse = lipgloss.Color("#1A1B26") // Dark text for light backgrounds
+	ColorAccent      = lipgloss.Color("#7AA2F7") // Periwinkle Blue
+	ColorDim         = lipgloss.Color("#6B7280") // Cool Slate
+	ColorStrike      = lipgloss.Color("#374151") // Darker Slate
+	ColorError       = lipgloss.Color("#EF4444") // Red
+	ColorSpecial     = lipgloss.Color("#4361EE") // Vibrant Blue
 )
 
 var (
 	titleStyle = lipgloss.NewStyle().
-			Foreground(ColorTextMain).
-			Background(ColorBrand).
+			Foreground(ColorTextInverse).
+			Background(ColorAccent).
 			Padding(0, 1)
 
 	winnerStyle = lipgloss.NewStyle().

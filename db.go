@@ -3,13 +3,17 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
 
+var dbPath string
+
 const (
-	dbName     = "tasks.db"
 	bucketName = "Tasks"
 )
 
@@ -30,8 +34,24 @@ func (t Task) Duration() time.Duration {
 // DB Helpers
 
 func setupDB() (*bolt.DB, error) {
-	db, err := bolt.Open(dbName, 0600, nil)
+	home, err := os.UserHomeDir()
 	if err != nil {
+		return nil, fmt.Errorf("could not find home directory: %v", err)
+	}
+
+	dataDir := filepath.Join(home, ".local", "share", "fate")
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, fmt.Errorf("could not create data directory: %v", err)
+	}
+
+	dbPath = filepath.Join(dataDir, "fate.db")
+
+	opts := &bolt.Options{Timeout: 200 * time.Millisecond}
+	db, err := bolt.Open(dbPath, 0600, opts)
+	if err != nil {
+		if err == bolt.ErrTimeout {
+			return nil, fmt.Errorf("fate is already running. Please close the other instance.")
+		}
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {

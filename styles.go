@@ -17,6 +17,7 @@ var (
 
 	listStyle = lipgloss.NewStyle().
 			Bold(true).
+			Italic(true).
 			MarginTop(1)
 
 	cursorStyle = lipgloss.NewStyle().

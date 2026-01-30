@@ -368,11 +368,11 @@ func (m model) View() string {
 		}
 		for i, task := range m.history {
 			cursor := "•"
-			style := dimStyle
+			style := taskStyle
 			var cStr string
 			if m.cursor == i {
 				cursor = ">"
-				style = dimStyle.Copy().Foreground(cursorStyle.GetForeground())
+				style = taskStyle.Copy().Foreground(cursorStyle.GetForeground())
 				cStr = cursorStyle.Render(cursor)
 			} else {
 				cStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(cursor)
@@ -384,7 +384,7 @@ func (m model) View() string {
 				dur = "0m"
 			}
 			
-			tStr := style.Render(fmt.Sprintf("%s (%s)", task.Name, dur))
+			tStr := style.UnsetWidth().Render(task.Name) + " " + cursorStyle.Render(fmt.Sprintf("(%s)", dur))
 			s += lipgloss.JoinHorizontal(lipgloss.Top, cStr+" ", tStr) + "\n"
 		}
 		s += "\n" + dimStyle.Render("(h: back • j/k: nav • d: delete • Esc: quit)") + "\n"
@@ -435,7 +435,7 @@ func (m model) View() string {
 		separator := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("─", boxWidth-2))
 		
 		timerLabel := lipgloss.NewStyle().Foreground(accentColor).Render("Elapsed: ")
-		timerValue := lipgloss.NewStyle().Foreground(whiteColor).Render(elapsed.String())
+		timerValue := lipgloss.NewStyle().Foreground(accentColor).Render(elapsed.String())
 		
 		boxContent := fmt.Sprintf("%s\n%s\n%s%s", taskName, separator, timerLabel, timerValue)
 		

@@ -336,7 +336,7 @@ func (m *model) clearAll() {
 }
 
 func (m model) View() string {
-	s := titleStyle.Render("Random Task Picker") + "\n\n"
+	s := titleStyle.Render("fate: a random task picker") + "\n\n"
 	
 	if m.showHistory {
 		s += listStyle.Render("Completed Tasks:") + "\n"

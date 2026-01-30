@@ -1,4 +1,4 @@
-module random-task
+module github.com/Conor-McLeod/fate
 
 go 1.25.5
 

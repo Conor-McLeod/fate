@@ -164,16 +164,13 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 		case "h":
 			m.state = StateHistory
 			m.cursor = 0
-		case "enter":
+		case "a":
 			m.state = StateAdding
 			m.textInput.Focus()
 		case "tab":
 			if m.selectedTask != nil {
 				m.state = StateFocusMode
 				m.confirmInput.Focus()
-			} else {
-				m.state = StateAdding
-				m.textInput.Focus()
 			}
 		case "esc":
 			return m, tea.Quit, true
@@ -189,6 +186,9 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 				return m, nil, true
 			}
 		case tea.KeyEsc:
+			if m.selectedTask != nil {
+				return m, tea.Quit, true
+			}
 			m.textInput.Blur()
 			m.textInput.SetValue("")
 			m.state = StateBrowsing
@@ -498,13 +498,16 @@ func (m model) viewHelp() string {
 	case StateEditing:
 		return "(Enter: save • Esc: cancel edit)"
 	case StateAdding:
+		if m.selectedTask != nil {
+			return "(Enter: save • Tab: toggle • Esc: quit)"
+		}
 		return "(Enter: save • Esc: cancel)"
 	case StateFocusMode:
-		return "(Type 'done' & Enter: finish • Tab: input • Esc: quit)"
+		return "(Enter: submit • Tab: toggle • Esc: quit)"
 	case StateHistory:
 		return "(h: back • j/k: nav • d: delete • Esc: quit)"
 	default:
-		return "(j/k: nav • r: pick • d: delete • c: clear • e: edit • h: history • Enter: add • Esc: quit)"
+		return "(j/k: nav • r: pick • d: delete • c: clear • e: edit • h: history • a: add • Esc: quit)"
 	}
 }
 

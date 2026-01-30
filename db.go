@@ -40,14 +40,14 @@ func setupDB() (*bolt.DB, error) {
 	}
 
 	dataDir := filepath.Join(home, ".local", "share", "fate")
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("could not create data directory: %v", err)
 	}
 
 	dbPath = filepath.Join(dataDir, "fate.db")
 
 	opts := &bolt.Options{Timeout: 200 * time.Millisecond}
-	db, err := bolt.Open(dbPath, 0600, opts)
+	db, err := bolt.Open(dbPath, 0o600, opts)
 	if err != nil {
 		if err == bolt.ErrTimeout {
 			return nil, fmt.Errorf("fate is already running. Please close the other instance.")
@@ -67,17 +67,17 @@ func addTask(db *bolt.DB, name string) (Task, error) {
 		b := tx.Bucket([]byte(bucketName))
 		id64, _ := b.NextSequence()
 		id := int(id64)
-		
+
 		task = Task{
 			ID:   id,
 			Name: name,
 		}
-		
+
 		buf, err := json.Marshal(task)
 		if err != nil {
 			return err
 		}
-		
+
 		return b.Put(itob(id), buf)
 	})
 	return task, err
@@ -86,12 +86,12 @@ func addTask(db *bolt.DB, name string) (Task, error) {
 func updateTask(db *bolt.DB, task Task) error {
 	return db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucketName))
-		
+
 		buf, err := json.Marshal(task)
 		if err != nil {
 			return err
 		}
-		
+
 		return b.Put(itob(task.ID), buf)
 	})
 }
@@ -105,7 +105,7 @@ func loadTasks(db *bolt.DB) ([]Task, error) {
 			var t Task
 			if err := json.Unmarshal(v, &t); err != nil {
 				// Skip invalid entries or handle error
-				continue 
+				continue
 			}
 			tasks = append(tasks, t)
 		}
@@ -121,15 +121,7 @@ func deleteTask(db *bolt.DB, id int) error {
 	})
 }
 
-func clearTasks(db *bolt.DB) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket([]byte(bucketName)); err != nil {
-			return err
-		}
-		_, err := tx.CreateBucket([]byte(bucketName))
-		return err
-	})
-}
+
 
 func itob(v int) []byte {
 	b := make([]byte, 8)

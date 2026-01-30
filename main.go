@@ -11,26 +11,32 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	bolt "go.etcd.io/bbolt"
-)
-
-
-
-
-
-type model struct {
-	db           *bolt.DB
-	textInput    textinput.Model
-	confirmInput textinput.Model
-	tasks        []Task // Pending tasks
-	history      []Task // Completed tasks
-	selectedTask *Task  // Pointer to the actual task in the slice/DB context
-	editingTask  *Task  // Pointer to task being edited
-	cursor       int
-	showHistory  bool
-	confirmClear bool
-}
-
+		bolt "go.etcd.io/bbolt"
+	)
+	
+	type State int
+	
+	const (
+		StateBrowsing State = iota
+		StateAdding         // Typing in the main text box
+		StateEditing        // Editing an existing task
+		StateFocusMode      // "Winner" view
+		StateHistory        // Viewing completed tasks
+		StateConfirmClear   // Asking "are you sure?"
+	)
+	
+	type model struct {
+		db           *bolt.DB
+		state        State
+		textInput    textinput.Model
+		confirmInput textinput.Model
+		tasks        []Task // Pending tasks
+		history      []Task // Completed tasks
+		selectedTask *Task  // Pointer to the actual task in the slice/DB context
+		editingTask  *Task  // Pointer to task being edited
+		cursor       int
+		err          error
+	}
 type tickMsg time.Time
 
 func tick() tea.Cmd {
@@ -67,12 +73,12 @@ func initialModel(db *bolt.DB) model {
 
 	m := model{
 		db:           db,
+		state:        StateBrowsing,
 		textInput:    ti,
 		confirmInput: ci,
 		tasks:        pending,
 		history:      history,
 		cursor:       0,
-		showHistory:  false,
 	}
 
 	// Restore active task if exists
@@ -80,6 +86,7 @@ func initialModel(db *bolt.DB) model {
 		if !m.tasks[i].PickedAt.IsZero() {
 			m.selectedTask = &m.tasks[i]
 			m.cursor = i
+			m.state = StateFocusMode
 			m.confirmInput.Focus()
 			m.textInput.Blur()
 			break
@@ -112,186 +119,189 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
-	isBlocked := m.selectedTask != nil
-
+	// Global keys
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit, true
-	case tea.KeyEsc:
-		if m.confirmClear {
-			m.confirmClear = false
-			return m, nil, true
-		}
-		if m.textInput.Focused() || m.confirmInput.Focused() {
-			m.textInput.Blur()
-			m.confirmInput.Blur()
-			return m, nil, true
-		}
-		return m, tea.Quit, true
-	case tea.KeyTab:
-		if isBlocked {
-			if m.textInput.Focused() {
-				m.textInput.Blur()
+	}
+
+	switch m.state {
+	case StateBrowsing:
+		switch msg.String() {
+		case "j", "down":
+			if m.cursor < len(m.tasks)-1 {
+				m.cursor++
+			}
+		case "k", "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "r":
+			if len(m.tasks) > 0 {
+				randomIndex := rand.Intn(len(m.tasks))
+				m.selectedTask = &m.tasks[randomIndex]
+				m.selectedTask.PickedAt = time.Now()
+				if err := updateTask(m.db, *m.selectedTask); err != nil {
+					m.err = err
+					return m, nil, true
+				}
+				m.cursor = randomIndex
+				m.state = StateFocusMode
+				m.confirmInput.Focus()
+			}
+		case "d", "backspace", "delete":
+			if len(m.tasks) > 0 {
+				m.deleteSelected()
+			}
+		case "c":
+			m.state = StateConfirmClear
+		case "e":
+			if len(m.tasks) > 0 {
+				m.editingTask = &m.tasks[m.cursor]
+				m.textInput.SetValue(m.editingTask.Name)
+				m.textInput.Focus()
+				m.state = StateEditing
+			}
+		case "h":
+			m.state = StateHistory
+			m.cursor = 0
+		case "enter":
+			m.state = StateAdding
+			m.textInput.Focus()
+		case "tab":
+			if m.selectedTask != nil {
+				m.state = StateFocusMode
 				m.confirmInput.Focus()
 			} else {
-				if m.confirmInput.Focused() {
-					m.confirmInput.Blur()
-					m.textInput.Focus()
-				} else {
-					m.confirmInput.Focus()
-				}
-			}
-			return m, nil, true
-		} else {
-			if m.textInput.Focused() {
-				m.textInput.Blur()
-			} else {
+				m.state = StateAdding
 				m.textInput.Focus()
 			}
-			return m, nil, true
 		}
-	case tea.KeyEnter:
-		if m.textInput.Focused() {
-			taskName := strings.TrimSpace(m.textInput.Value())
-			if taskName == "" {
-				return m, nil, true
+
+	case StateAdding:
+		switch msg.Type {
+		case tea.KeyTab:
+			if m.selectedTask != nil {
+				m.state = StateFocusMode
+				m.confirmInput.Focus()
+				m.textInput.Blur()
 			}
+		case tea.KeyEsc:
+			m.textInput.Blur()
+			m.textInput.SetValue("")
+			m.state = StateBrowsing
+		case tea.KeyEnter:
+			taskName := strings.TrimSpace(m.textInput.Value())
+			if taskName != "" {
+				task, err := addTask(m.db, taskName)
+				if err != nil {
+					m.err = err
+					return m, nil, true
+				}
+				m.tasks = append(m.tasks, task)
+				m.cursor = len(m.tasks) - 1
+			}
+			m.textInput.SetValue("")
+			// Stay in adding mode for rapid entry? Or go back?
+			// Original behavior was stay focused.
+			// Let's keep focus.
+		}
 
-			if m.editingTask != nil {
+	case StateEditing:
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.editingTask = nil
+			m.textInput.Blur()
+			m.textInput.SetValue("")
+			m.state = StateBrowsing
+		case tea.KeyEnter:
+			taskName := strings.TrimSpace(m.textInput.Value())
+			if taskName != "" {
 				m.editingTask.Name = taskName
-				_ = updateTask(m.db, *m.editingTask)
-
-				// Update the task in the tasks slice
+				if err := updateTask(m.db, *m.editingTask); err != nil {
+					m.err = err
+					return m, nil, true
+				}
+				// Update slice
 				for i, t := range m.tasks {
 					if t.ID == m.editingTask.ID {
 						m.tasks[i] = *m.editingTask
 						break
 					}
 				}
-
-				m.editingTask = nil
-				m.textInput.SetValue("")
-				m.textInput.Blur()
-			} else {
-				task, err := addTask(m.db, taskName)
-				if err == nil {
-					m.tasks = append(m.tasks, task)
-					m.textInput.SetValue("")
-					m.cursor = len(m.tasks) - 1
-				}
 			}
-			return m, nil, true
-		} else if m.confirmInput.Focused() {
+			m.editingTask = nil
+			m.textInput.SetValue("")
+			m.textInput.Blur()
+			m.state = StateBrowsing
+		}
+
+	case StateFocusMode:
+		// Logic: User must type "done" in the confirmInput
+		switch msg.Type {
+		case tea.KeyEsc:
+			// Allow quitting app, but NOT leaving focus mode easily?
+			return m, tea.Quit, true
+		case tea.KeyTab:
+			m.state = StateAdding
+			m.textInput.Focus()
+			m.confirmInput.Blur()
+		case tea.KeyEnter:
 			if m.confirmInput.Value() == "done" {
 				m.completeSelectedTask()
 				m.confirmInput.SetValue("")
 				m.confirmInput.Blur()
-				m.textInput.Focus()
+				m.state = StateBrowsing
 			}
-			return m, nil, true
-		}
-	case tea.KeyUp:
-		if !m.textInput.Focused() && !m.confirmInput.Focused() {
-			if m.cursor > 0 {
-				m.cursor--
-			}
-			return m, nil, true
-		}
-	case tea.KeyDown:
-		if !m.textInput.Focused() && !m.confirmInput.Focused() {
-			maxLen := len(m.tasks)
-			if m.showHistory {
-				maxLen = len(m.history)
-			}
-			if m.cursor < maxLen-1 {
-				m.cursor++
-			}
-			return m, nil, true
-		}
-	case tea.KeyBackspace, tea.KeyDelete:
-		canDelete := !m.textInput.Focused() && !m.confirmInput.Focused() && !isBlocked
-		hasItems := (m.showHistory && len(m.history) > 0) || (!m.showHistory && len(m.tasks) > 0)
-
-		if canDelete && hasItems {
-			m.deleteSelected()
-			return m, nil, true
-		}
-	}
-
-	// Only handle character commands if NO input is focused
-	if !m.textInput.Focused() && !m.confirmInput.Focused() {
-		if m.confirmClear {
-			if msg.String() == "y" || msg.String() == "Y" {
-				m.clearAll()
-			}
-			m.confirmClear = false
-			return m, nil, true
 		}
 
+	case StateHistory:
 		switch msg.String() {
-		case "k":
+		case "j", "down":
+			if m.cursor < len(m.history)-1 {
+				m.cursor++
+			}
+		case "k", "up":
 			if m.cursor > 0 {
 				m.cursor--
 			}
-			return m, nil, true
-		case "j":
-			maxLen := len(m.tasks)
-			if m.showHistory {
-				maxLen = len(m.history)
-			}
-			if m.cursor < maxLen-1 {
-				m.cursor++
-			}
-			return m, nil, true
-		case "r":
-			if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
-				randomIndex := rand.Intn(len(m.tasks))
-				m.selectedTask = &m.tasks[randomIndex]
-				m.selectedTask.PickedAt = time.Now()
-				_ = updateTask(m.db, *m.selectedTask)
-				m.cursor = randomIndex
-				m.confirmInput.Focus()
-				return m, nil, true
-			}
-		case "d":
-			if !isBlocked && ((!m.showHistory && len(m.tasks) > 0) || (m.showHistory && len(m.history) > 0)) {
+		case "d", "backspace", "delete":
+			if len(m.history) > 0 {
 				m.deleteSelected()
-				return m, nil, true
 			}
-		case "c":
-			if !isBlocked && !m.showHistory {
-				m.confirmClear = true
-				return m, nil, true
-			}
-		case "h":
-			m.showHistory = !m.showHistory
+		case "h", "esc":
+			m.state = StateBrowsing
 			m.cursor = 0
-			return m, nil, true
-		case "e":
-			if !isBlocked && len(m.tasks) > 0 && !m.showHistory {
-				m.editingTask = &m.tasks[m.cursor]
-				m.textInput.SetValue(m.editingTask.Name)
-				m.textInput.Focus()
-				return m, nil, true
-			}
+		}
+
+	case StateConfirmClear:
+		switch msg.String() {
+		case "y", "Y":
+			m.clearAll()
+			m.state = StateBrowsing
+		case "n", "N", "esc":
+			m.state = StateBrowsing
 		}
 	}
 
-	return m, nil, false
+	return m, nil, true
 }
 
 func (m *model) completeSelectedTask() {
 	if m.selectedTask == nil {
 		return
 	}
+
+		// Update timestamp
+		m.selectedTask.CompletedAt = time.Now()
+		if err := updateTask(m.db, *m.selectedTask); err != nil {
+			m.err = err
+			return
+		}
 	
-	// Update timestamp
-	m.selectedTask.CompletedAt = time.Now()
-	_ = updateTask(m.db, *m.selectedTask)
-	
-	// Move to history
+		// Move to history
 	m.history = append(m.history, *m.selectedTask)
-	
+
 	// Remove from pending tasks
 	// Need to find index because selectedTask is a pointer
 	for i, t := range m.tasks {
@@ -300,9 +310,9 @@ func (m *model) completeSelectedTask() {
 			break
 		}
 	}
-	
+
 	m.selectedTask = nil
-	
+
 	// Fix cursor
 	if m.cursor >= len(m.tasks) && len(m.tasks) > 0 {
 		m.cursor = len(m.tasks) - 1
@@ -311,7 +321,7 @@ func (m *model) completeSelectedTask() {
 
 func (m *model) deleteSelected() {
 	var targetList *[]Task
-	if m.showHistory {
+	if m.state == StateHistory {
 		targetList = &m.history
 	} else {
 		targetList = &m.tasks
@@ -320,10 +330,11 @@ func (m *model) deleteSelected() {
 	if m.cursor < 0 || m.cursor >= len(*targetList) {
 		return
 	}
-	
+
 	task := (*targetList)[m.cursor]
 	if err := deleteTask(m.db, task.ID); err != nil {
-		return // Handle error
+		m.err = err
+		return
 	}
 
 	// Remove from slice
@@ -333,26 +344,18 @@ func (m *model) deleteSelected() {
 	if m.cursor >= len(*targetList) && len(*targetList) > 0 {
 		m.cursor = len(*targetList) - 1
 	}
-	
-	// Reset selection if we deleted the winner (only relevant for pending tasks)
-	if !m.showHistory && m.selectedTask != nil && m.selectedTask.ID == task.ID {
-		m.selectedTask = nil
-	}
 }
 
 func (m *model) clearAll() {
-	// Only clear pending tasks? Or all? User likely expects current list cleared.
-	// Since we are in pending view (h blocked), let's clear pending.
-	
-	// NOTE: Implementation of clearTasks wipes the bucket, which kills history too.
-	// We should probably iterate and delete only pending.
-	// For now, let's keep simple clearTasks but re-save history? 
-	// Or better, iterate pending tasks and delete them one by one.
+	// Clear pending tasks only
 	
 	for _, t := range m.tasks {
-		_ = deleteTask(m.db, t.ID)
+		if err := deleteTask(m.db, t.ID); err != nil {
+			m.err = err
+			return
+		}
 	}
-	
+
 	m.tasks = []Task{}
 	m.cursor = 0
 	m.selectedTask = nil
@@ -360,48 +363,74 @@ func (m *model) clearAll() {
 
 func (m model) View() string {
 	s := titleStyle.Render("fate: a random task picker") + "\n\n"
-	
-	if m.showHistory {
-		s += listStyle.Render("Completed Tasks:") + "\n"
-		if len(m.history) == 0 {
-			s += dimStyle.Render("No history yet.") + "\n"
+
+	switch m.state {
+	case StateHistory:
+		s += m.viewHistory()
+	case StateFocusMode:
+		s += m.viewPending()
+		s += m.viewWinner()
+	default:
+		// Browsing, Adding, Editing, ConfirmClear all share the main list view
+		s += m.viewPending()
+		// If we have a winner but we are temporarily doing something else (like adding), show it!
+		if m.selectedTask != nil {
+			s += m.viewWinner()
 		}
-		for i, task := range m.history {
-			cursor := "•"
-			style := taskStyle
-			var cStr string
-			if m.cursor == i {
-				cursor = ">"
-				style = taskStyle.Copy().Foreground(cursorStyle.GetForeground())
-				cStr = cursorStyle.Render(cursor)
-			} else {
-				cStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(cursor)
-			}
-			
-			dur := task.Duration().Round(time.Minute).String()
-			dur = strings.TrimSuffix(dur, "0s")
-			if dur == "" {
-				dur = "0m"
-			}
-			
-			tStr := style.UnsetWidth().Render(task.Name) + " " + cursorStyle.Render(fmt.Sprintf("(%s)", dur))
-			s += lipgloss.JoinHorizontal(lipgloss.Top, cStr+" ", tStr) + "\n"
-		}
-		s += "\n" + dimStyle.Render("(h: back • j/k: nav • d: delete • Esc: quit)") + "\n"
-		return s
 	}
 
-	if m.editingTask != nil {
+	s += "\n" + dimStyle.Render(m.viewHelp()) + "\n"
+	
+	if m.err != nil {
+		s += lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("\nError: %v", m.err))
+	}
+	
+	return s
+}
+
+func (m model) viewHistory() string {
+	s := listStyle.Render("Completed Tasks:") + "\n"
+	if len(m.history) == 0 {
+		s += dimStyle.Render("No history yet.") + "\n"
+	}
+	for i, task := range m.history {
+		cursor := "•"
+		style := taskStyle
+		var cStr string
+		if m.cursor == i {
+			cursor = ">"
+			style = taskStyle.Copy().Foreground(cursorStyle.GetForeground())
+			cStr = cursorStyle.Render(cursor)
+		} else {
+			cStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(cursor)
+		}
+
+		dur := task.Duration().Round(time.Minute).String()
+		dur = strings.TrimSuffix(dur, "0s")
+		if dur == "" {
+			dur = "0m"
+		}
+
+		tStr := style.UnsetWidth().Render(task.Name) + " " + cursorStyle.Render(fmt.Sprintf("(%s)", dur))
+		s += lipgloss.JoinHorizontal(lipgloss.Top, cStr+" ", tStr) + "\n"
+	}
+	s += "\n" + dimStyle.Render("(h: back • j/k: nav • d: delete • Esc: quit)") + "\n"
+	return s
+}
+
+func (m model) viewPending() string {
+	s := ""
+	if m.state == StateEditing {
 		s += lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render("EDITING MODE") + "\n"
 	}
-	if m.confirmClear {
+	if m.state == StateConfirmClear {
 		s += lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Bold(true).Render("Are you sure you want to clear? y/N") + "\n"
 	}
 	s += m.textInput.View() + "\n"
 
 	s += listStyle.Render("Tasks:") + "\n"
 	for i, task := range m.tasks {
-		cursor := "•" 
+		cursor := "•"
 		style := taskStyle
 		var cStr string
 		if m.cursor == i {
@@ -411,71 +440,58 @@ func (m model) View() string {
 		} else {
 			cStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(cursor)
 		}
-		
+
 		// If editing this specific task, maybe mark it visually?
-		if m.editingTask != nil && m.editingTask.ID == task.ID {
+		if m.state == StateEditing && m.editingTask != nil && m.editingTask.ID == task.ID {
 			style = style.Copy().Foreground(lipgloss.Color("205")).Bold(true)
 		}
-		
+
 		tStr := style.Render(task.Name)
 		s += lipgloss.JoinHorizontal(lipgloss.Top, cStr+" ", tStr) + "\n"
 	}
-
-	if m.selectedTask != nil {
-		elapsed := time.Since(m.selectedTask.PickedAt).Round(time.Second)
-		
-		accentColor := lipgloss.Color("#EE6FF8")
-		whiteColor := lipgloss.Color("#FFFFFF")
-		
-		label := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("DO THIS:")
-		
-		// Create the content for the box
-		boxWidth := 60
-		taskName := lipgloss.NewStyle().Foreground(whiteColor).Render(m.selectedTask.Name)
-		separator := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("─", boxWidth-2))
-		
-		timerLabel := lipgloss.NewStyle().Foreground(accentColor).Render("Elapsed: ")
-		timerValue := lipgloss.NewStyle().Foreground(accentColor).Render(elapsed.String())
-		
-		boxContent := fmt.Sprintf("%s\n%s\n%s%s", taskName, separator, timerLabel, timerValue)
-		
-		s += "\n" + label + "\n"
-		s += winnerStyle.Render(boxContent) + "\n"
-		s += m.confirmInput.View() + "\n"
-	}
-
-	help := ""
-	if m.confirmClear {
-		help = "(y: yes, clear all • n: cancel)"
-	} else if m.textInput.Focused() {
-		if m.editingTask != nil {
-			help = "(Enter: save • Esc: cancel edit)"
-		} else {
-			if m.selectedTask != nil {
-				help = "(Enter: add • Tab: confirm • Esc: blur)"
-			} else {
-				help = "(Enter: add • Tab: commands • Esc: blur)"
-			}
-		}
-	} else if m.confirmInput.Focused() {
-		help = "(Type 'done' & Enter: finish • Tab: input • Esc: blur)"
-	} else {
-		if m.selectedTask != nil {
-			// Blocked state
-			help = fmt.Sprintf("(%s • %s • %s • %s • Tab: done • Esc: quit)", 
-				strikeStyle.Render("r: pick"), 
-				strikeStyle.Render("d: delete"), 
-				strikeStyle.Render("c: clear"),
-				"h: history") // Allow history check while blocked? Sure.
-		} else {
-			help = "(j/k: nav • r: pick • d: delete • c: clear • e: edit • h: history • Tab: input • Esc: quit)"
-		}
-	}
-	s += "\n" + dimStyle.Render(help) + "\n"
 	return s
 }
 
+func (m model) viewWinner() string {
+	elapsed := time.Since(m.selectedTask.PickedAt).Round(time.Second)
 
+	accentColor := lipgloss.Color("#EE6FF8")
+	whiteColor := lipgloss.Color("#FFFFFF")
+
+	label := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("DO THIS:")
+
+	// Create the content for the box
+	boxWidth := 60
+	taskName := lipgloss.NewStyle().Foreground(whiteColor).Render(m.selectedTask.Name)
+	separator := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("─", boxWidth-2))
+
+	timerLabel := lipgloss.NewStyle().Foreground(accentColor).Render("Elapsed: ")
+	timerValue := lipgloss.NewStyle().Foreground(accentColor).Render(elapsed.String())
+
+	boxContent := fmt.Sprintf("%s\n%s\n%s%s", taskName, separator, timerLabel, timerValue)
+
+	s := "\n" + label + "\n"
+	s += winnerStyle.Render(boxContent) + "\n"
+	s += m.confirmInput.View() + "\n"
+	return s
+}
+
+func (m model) viewHelp() string {
+	switch m.state {
+	case StateConfirmClear:
+		return "(y: yes, clear all • n: cancel)"
+	case StateEditing:
+		return "(Enter: save • Esc: cancel edit)"
+	case StateAdding:
+		return "(Enter: save • Esc: cancel)"
+	case StateFocusMode:
+		return "(Type 'done' & Enter: finish • Tab: input • Esc: quit)"
+	case StateHistory:
+		return "(h: back • j/k: nav • d: delete • Esc: quit)"
+	default:
+		return "(j/k: nav • r: pick • d: delete • c: clear • e: edit • h: history • Enter: add • Esc: quit)"
+	}
+}
 
 func main() {
 	db, err := setupDB()

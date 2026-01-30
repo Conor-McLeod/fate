@@ -36,6 +36,8 @@ type model struct {
 	editingTask  *Task  // Pointer to task being edited
 	cursor       int
 	err          error
+	readdedIdx   int // Index of recently re-added history item (-1 if none)
+	readdedTicks int // Ticks remaining to show flash
 }
 type tickMsg time.Time
 
@@ -78,6 +80,7 @@ func initialModel(db *bolt.DB) model {
 		tasks:        pending,
 		history:      history,
 		cursor:       0,
+		readdedIdx:   -1,
 	}
 
 	// Restore active task if exists
@@ -106,6 +109,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return model, cmd
 		}
 	case tickMsg:
+		// Clear re-added flash after countdown
+		if m.readdedTicks > 0 {
+			m.readdedTicks--
+			if m.readdedTicks == 0 {
+				m.readdedIdx = -1
+			}
+		}
 		return m, tick()
 	}
 
@@ -279,6 +289,17 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 			if m.cursor > 0 {
 				m.cursor--
 			}
+		case "a":
+			if len(m.history) > 0 && m.cursor < len(m.history) {
+				task, err := addTask(m.db, m.history[m.cursor].Name)
+				if err != nil {
+					m.err = err
+					return m, nil, true
+				}
+				m.tasks = append(m.tasks, task)
+				m.readdedIdx = m.cursor
+				m.readdedTicks = 2
+			}
 		case "d", "backspace", "delete":
 			if len(m.history) > 0 {
 				m.deleteSelected()
@@ -428,6 +449,9 @@ func (m model) viewHistory() string {
 		}
 
 		tStr := style.UnsetWidth().Render(task.Name) + " " + cursorStyle.Render(fmt.Sprintf("(%s)", dur))
+		if m.readdedIdx == i {
+			tStr += " " + lipgloss.NewStyle().Foreground(ColorAccent).Render("re-added!")
+		}
 		s += lipgloss.JoinHorizontal(lipgloss.Top, cStr+" ", tStr) + "\n"
 	}
 	return s
@@ -502,7 +526,7 @@ func (m model) viewHelp() string {
 	case StateFocusMode:
 		return "(Enter: submit • Tab: toggle • Esc: quit)"
 	case StateHistory:
-		return "(h: back • j/k: nav • d: delete • Esc: quit)"
+		return "(h: back • j/k: nav • a: re-add • d: delete • Esc: quit)"
 	default:
 		return "(j/k: nav • r: pick • d: delete • c: clear • e: edit • h: history • a: add • Esc: quit)"
 	}

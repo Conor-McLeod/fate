@@ -11,32 +11,32 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-		bolt "go.etcd.io/bbolt"
-	)
-	
-	type State int
-	
-	const (
-		StateBrowsing State = iota
-		StateAdding         // Typing in the main text box
-		StateEditing        // Editing an existing task
-		StateFocusMode      // "Winner" view
-		StateHistory        // Viewing completed tasks
-		StateConfirmClear   // Asking "are you sure?"
-	)
-	
-	type model struct {
-		db           *bolt.DB
-		state        State
-		textInput    textinput.Model
-		confirmInput textinput.Model
-		tasks        []Task // Pending tasks
-		history      []Task // Completed tasks
-		selectedTask *Task  // Pointer to the actual task in the slice/DB context
-		editingTask  *Task  // Pointer to task being edited
-		cursor       int
-		err          error
-	}
+	bolt "go.etcd.io/bbolt"
+)
+
+type State int
+
+const (
+	StateBrowsing     State = iota
+	StateAdding             // Typing in the main text box
+	StateEditing            // Editing an existing task
+	StateFocusMode          // "Winner" view
+	StateHistory            // Viewing completed tasks
+	StateConfirmClear       // Asking "are you sure?"
+)
+
+type model struct {
+	db           *bolt.DB
+	state        State
+	textInput    textinput.Model
+	confirmInput textinput.Model
+	tasks        []Task // Pending tasks
+	history      []Task // Completed tasks
+	selectedTask *Task  // Pointer to the actual task in the slice/DB context
+	editingTask  *Task  // Pointer to task being edited
+	cursor       int
+	err          error
+}
 type tickMsg time.Time
 
 func tick() tea.Cmd {
@@ -48,7 +48,6 @@ func tick() tea.Cmd {
 func initialModel(db *bolt.DB) model {
 	ti := textinput.New()
 	ti.Placeholder = "Enter a task..."
-	ti.Focus()
 	ti.CharLimit = 300
 	ti.Width = 100
 
@@ -176,6 +175,8 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 				m.state = StateAdding
 				m.textInput.Focus()
 			}
+		case "esc":
+			return m, tea.Quit, true
 		}
 
 	case StateAdding:
@@ -185,11 +186,13 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 				m.state = StateFocusMode
 				m.confirmInput.Focus()
 				m.textInput.Blur()
+				return m, nil, true
 			}
 		case tea.KeyEsc:
 			m.textInput.Blur()
 			m.textInput.SetValue("")
 			m.state = StateBrowsing
+			return m, nil, true
 		case tea.KeyEnter:
 			taskName := strings.TrimSpace(m.textInput.Value())
 			if taskName != "" {
@@ -205,6 +208,9 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 			// Stay in adding mode for rapid entry? Or go back?
 			// Original behavior was stay focused.
 			// Let's keep focus.
+			return m, nil, true
+		default:
+			return m, nil, false
 		}
 
 	case StateEditing:
@@ -214,6 +220,7 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 			m.textInput.Blur()
 			m.textInput.SetValue("")
 			m.state = StateBrowsing
+			return m, nil, true
 		case tea.KeyEnter:
 			taskName := strings.TrimSpace(m.textInput.Value())
 			if taskName != "" {
@@ -234,6 +241,9 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 			m.textInput.SetValue("")
 			m.textInput.Blur()
 			m.state = StateBrowsing
+			return m, nil, true
+		default:
+			return m, nil, false
 		}
 
 	case StateFocusMode:
@@ -246,6 +256,7 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 			m.state = StateAdding
 			m.textInput.Focus()
 			m.confirmInput.Blur()
+			return m, nil, true
 		case tea.KeyEnter:
 			if m.confirmInput.Value() == "done" {
 				m.completeSelectedTask()
@@ -253,6 +264,9 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 				m.confirmInput.Blur()
 				m.state = StateBrowsing
 			}
+			return m, nil, true
+		default:
+			return m, nil, false
 		}
 
 	case StateHistory:
@@ -269,9 +283,11 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 			if len(m.history) > 0 {
 				m.deleteSelected()
 			}
-		case "h", "esc":
+		case "h":
 			m.state = StateBrowsing
 			m.cursor = 0
+		case "esc":
+			return m, tea.Quit, true
 		}
 
 	case StateConfirmClear:
@@ -292,14 +308,14 @@ func (m *model) completeSelectedTask() {
 		return
 	}
 
-		// Update timestamp
-		m.selectedTask.CompletedAt = time.Now()
-		if err := updateTask(m.db, *m.selectedTask); err != nil {
-			m.err = err
-			return
-		}
-	
-		// Move to history
+	// Update timestamp
+	m.selectedTask.CompletedAt = time.Now()
+	if err := updateTask(m.db, *m.selectedTask); err != nil {
+		m.err = err
+		return
+	}
+
+	// Move to history
 	m.history = append(m.history, *m.selectedTask)
 
 	// Remove from pending tasks
@@ -348,7 +364,7 @@ func (m *model) deleteSelected() {
 
 func (m *model) clearAll() {
 	// Clear pending tasks only
-	
+
 	for _, t := range m.tasks {
 		if err := deleteTask(m.db, t.ID); err != nil {
 			m.err = err
@@ -380,11 +396,11 @@ func (m model) View() string {
 	}
 
 	s += "\n" + dimStyle.Render(m.viewHelp()) + "\n"
-	
+
 	if m.err != nil {
 		s += lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("\nError: %v", m.err))
 	}
-	
+
 	return s
 }
 
@@ -414,7 +430,6 @@ func (m model) viewHistory() string {
 		tStr := style.UnsetWidth().Render(task.Name) + " " + cursorStyle.Render(fmt.Sprintf("(%s)", dur))
 		s += lipgloss.JoinHorizontal(lipgloss.Top, cStr+" ", tStr) + "\n"
 	}
-	s += "\n" + dimStyle.Render("(h: back • j/k: nav • d: delete • Esc: quit)") + "\n"
 	return s
 }
 

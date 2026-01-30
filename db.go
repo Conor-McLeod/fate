@@ -121,8 +121,6 @@ func deleteTask(db *bolt.DB, id int) error {
 	})
 }
 
-
-
 func itob(v int) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, uint64(v))

@@ -4,6 +4,8 @@
 
 Built with [Go](https://go.dev/) and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
+![Demo of My CLI Tool](assets/demo.gif)
+
 ## Features
 
 -   **🎯 Random Picker:** Let *fate* decide what you work on next.

@@ -73,4 +73,4 @@ This allows you to access your centralized task list from any directory on your 
 
 ## License
 
-[MIT](LICENSE)
+[MIT](./LICENSE.md)

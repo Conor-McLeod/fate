@@ -158,6 +158,17 @@ func (m model) handleKey(msg tea.KeyMsg) (model, tea.Cmd, bool) {
 				m.state = StateFocusMode
 				m.confirmInput.Focus()
 			}
+		case "p":
+			if len(m.tasks) > 0 {
+				m.selectedTask = &m.tasks[m.cursor]
+				m.selectedTask.PickedAt = time.Now()
+				if err := updateTask(m.db, *m.selectedTask); err != nil {
+					m.err = err
+					return m, nil, true
+				}
+				m.state = StateFocusMode
+				m.confirmInput.Focus()
+			}
 		case "d", "backspace", "delete":
 			if len(m.tasks) > 0 {
 				m.deleteSelected()
@@ -528,7 +539,7 @@ func (m model) viewHelp() string {
 	case StateHistory:
 		return "(h: back • j/k: nav • a: re-add • d: delete • Esc: quit)"
 	default:
-		return "(j/k: nav • r: pick • d: delete • c: clear • e: edit • h: history • a: add • Esc: quit)"
+		return "(j/k: nav • p: pick • r: pick (random) • d: delete • c: clear • e: edit • h: history • a: add • Esc: quit)"
 	}
 }
 

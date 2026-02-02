@@ -1,0 +1,8 @@
+.gemini
+.claude
+GEMINI.md
+CLAUDE.md
+gha-creds-*.json
+
+# Executable
+fate
